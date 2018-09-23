@@ -43,7 +43,12 @@ func ParseBytes(f io.Reader) (*File, error) {
 		res.Meta = meta
 	}
 
-	res.Frames = readFLACStream(f)
+	var err error
+	res.Frames, err = readFLACStream(f)
+	if err != nil {
+		return nil, err
+	}
+
 	return res, nil
 }
 

@@ -3,7 +3,6 @@ package flac
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 )
 
@@ -15,7 +14,7 @@ func encodeUint32(n uint32) []byte {
 	return buf.Bytes()
 }
 
-func readFLACStream(f io.Reader) []byte {
+func readFLACStream(f io.Reader) ([]byte, error) {
 	buffer := make([]byte, 1024*1024) // read in 1M chunk
 	res := bytes.NewBuffer([]byte{})
 	for {
@@ -25,9 +24,9 @@ func readFLACStream(f io.Reader) []byte {
 			if err == io.EOF {
 				result := res.Bytes()
 				if result[0] != 0xFF || result[1]>>2 != 0x3E {
-					panic("incorrect sync code")
+					return nil, ErrorNoSyncCode
 				}
-				return result
+				return result, nil
 			}
 			panic(err)
 		}
@@ -49,11 +48,21 @@ func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err er
 		return
 	}
 	length = length << 8 >> 8
-	block.Data = make([]byte, length)
-	_, err = f.Read(block.Data)
-	if err != nil {
-		panic(err)
+
+	data := bytes.NewBuffer([]byte{})
+
+	var nn int
+	for length > 0 {
+		buf := make([]byte, length)
+		nn, err = f.Read(buf)
+		if err != nil {
+			return
+		}
+		data.Write(buf[:nn])
+		length -= uint32(nn)
 	}
+	block.Data = data.Bytes()
+
 	return
 }
 
@@ -77,7 +86,7 @@ func readFLACHead(f io.Reader) error {
 		panic(err)
 	}
 	if string(buffer) != "fLaC" {
-		return errors.New("Head incorrect")
+		return ErrorNoFLACHeader
 	}
 	return nil
 }
