@@ -35,28 +35,41 @@ func TestFLACDecode(t *testing.T) {
 		t.FailNow()
 	}
 
+	verify := func(f *File) {
+
+		metadata := [][]int{
+			[]int{0, 34},
+			[]int{4, 149},
+			[]int{6, 58388},
+			[]int{2, 1402},
+			[]int{1, 102},
+		}
+
+		for i, meta := range f.Meta {
+			if BlockType(metadata[i][0]) != meta.Type {
+				t.Errorf("Metadata type mismatch: got %d expected %d", meta.Type, metadata[i][0])
+				t.Fail()
+			}
+			if metadata[i][1] != len(meta.Data) {
+				t.Errorf("Metadata size mismatch: got %d expected %d", len(meta.Data), metadata[i][1])
+				t.Fail()
+			}
+		}
+	}
+
 	f, err := ParseBytes(flachandle)
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
 		t.Fail()
 	}
 
-	metadata := [][]int{
-		[]int{0, 34},
-		[]int{4, 149},
-		[]int{6, 58388},
-		[]int{2, 1402},
-		[]int{1, 102},
-	}
+	verify(f)
 
-	for i, meta := range f.Meta {
-		if BlockType(metadata[i][0]) != meta.Type {
-			t.Errorf("Metadata type mismatch: got %d expected %d", meta.Type, metadata[i][0])
-			t.Fail()
-		}
-		if metadata[i][1] != len(meta.Data) {
-			t.Errorf("Metadata size mismatch: got %d expected %d", len(meta.Data), metadata[i][1])
-			t.Fail()
-		}
+	f, err = ParseBytes(bytes.NewReader(f.Marshal()))
+	if err != nil {
+		t.Errorf("Failed to parse flac file: %s", err)
+		t.Fail()
 	}
+	verify(f)
+
 }
