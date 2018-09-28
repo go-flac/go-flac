@@ -14,6 +14,21 @@ func encodeUint32(n uint32) []byte {
 	return buf.Bytes()
 }
 
+func readUint8(r io.Reader) (res uint8, err error) {
+	err = binary.Read(r, binary.BigEndian, &res)
+	return
+}
+
+func readUint16(r io.Reader) (res uint16, err error) {
+	err = binary.Read(r, binary.BigEndian, &res)
+	return
+}
+
+func readUint32(r io.Reader) (res uint32, err error) {
+	err = binary.Read(r, binary.BigEndian, &res)
+	return
+}
+
 func readFLACStream(f io.Reader) ([]byte, error) {
 	buffer := make([]byte, 1024*1024) // read in 1M chunk
 	res := bytes.NewBuffer([]byte{})
