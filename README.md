@@ -12,7 +12,14 @@ A FLAC(Free Lossless Audio Codec) stream generally consists of 3 parts: a "fLaC"
 
 ## Usage
 
-[go-flac](https://github.com/go-flac/flacpicture) provided two APIs([ParseBytes](https://godoc.org/github.com/go-flac/go-flac#ParseBytes) and [ParseFile](https://godoc.org/github.com/go-flac/go-flac#ParseFile)) to read FLAC file or byte sequence and returns a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct. The [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct has two exported fields, Meta and Frames, the Frames consisted of raw stream data and the Meta field was a slice of all MetaDataBlocks present in the file. Other packages could parse/construct a [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock) by inspecting its Type field and apply proper decoding/encoding on the Data field of the [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock). You can modify the elements in the Meta field of a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) as you like, as long as the StreamInfo metadata block is the first element in Meta field, according to the [specs](https://xiph.org/flac/format.html) of FLAC format.
+[go-flac](https://github.com/go-flac/flacpicture) provided three APIs for reading FLAC files and returns a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct:
+
+- [ParseBytes](https://godoc.org/github.com/go-flac/go-flac#ParseBytes) for consuming a whole FLAC stream from an io.Reader.
+- [ParseFile](https://godoc.org/github.com/go-flac/go-flac#ParseFile) for consuming a whole FLAC stream from a file.
+- [ParseMetadata](https://godoc.org/github.com/go-flac/go-flac#ParseMetadata) for consuming only metadata from am io.Reader.
+
+
+The [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct has two exported fields, Meta and Frames, the Frames consisted of raw stream data and the Meta field was a slice of all MetaDataBlocks present in the file. Other packages could parse/construct a [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock) by inspecting its Type field and apply proper decoding/encoding on the Data field of the [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock). You can modify the elements in the Meta field of a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) as you like, as long as the StreamInfo metadata block is the first element in Meta field, according to the [specs](https://xiph.org/flac/format.html) of FLAC format.
 
 ## Examples
 The following example extracts the sample rate of a FLAC file.

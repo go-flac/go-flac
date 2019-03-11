@@ -30,20 +30,31 @@ func (c *File) Save(fn string) error {
 	return ioutil.WriteFile(fn, c.Marshal(), 0644)
 }
 
-// ParseBytes accepts a reader to a FLAC stream and returns the final file
-func ParseBytes(f io.Reader) (*File, error) {
+// ParseMetadata accepts a reader to a FLAC stream and consumes only FLAC metadata
+// Frames is always nil
+func ParseMetadata(f io.Reader) (*File, error) {
 	res := new(File)
 
 	if err := readFLACHead(f); err != nil {
 		return nil, err
 	}
-	if meta, err := readMetadataBlocks(f); err != nil {
+	meta, err := readMetadataBlocks(f)
+	if err != nil {
 		return nil, err
-	} else {
-		res.Meta = meta
 	}
 
-	var err error
+	res.Meta = meta
+
+	return res, nil
+}
+
+// ParseBytes accepts a reader to a FLAC stream and returns the final file
+func ParseBytes(f io.Reader) (*File, error) {
+	res, err := ParseMetadata(f)
+	if err != nil {
+		return nil, err
+	}
+
 	res.Frames, err = readFLACStream(f)
 	if err != nil {
 		return nil, err
