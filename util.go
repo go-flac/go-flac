@@ -43,7 +43,7 @@ func readFLACStream(f io.Reader) ([]byte, error) {
 				}
 				return result, nil
 			}
-			panic(err)
+			return nil, err
 		}
 	}
 }
@@ -98,7 +98,7 @@ func readFLACHead(f io.Reader) error {
 	buffer := make([]byte, 4)
 	_, err := f.Read(buffer)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	if string(buffer) != "fLaC" {
 		return ErrorNoFLACHeader
