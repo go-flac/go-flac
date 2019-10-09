@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
+	"io/ioutil"
 )
 
 func encodeUint32(n uint32) []byte {
@@ -30,28 +31,20 @@ func readUint32(r io.Reader) (res uint32, err error) {
 }
 
 func readFLACStream(f io.Reader) ([]byte, error) {
-	buffer := make([]byte, 1024*1024) // read in 1M chunk
-	res := bytes.NewBuffer([]byte{})
-	for {
-		nn, err := f.Read(buffer)
-		res.Write(buffer[:nn])
-		if err != nil {
-			if err == io.EOF {
-				result := res.Bytes()
-				if result[0] != 0xFF || result[1]>>2 != 0x3E {
-					return nil, ErrorNoSyncCode
-				}
-				return result, nil
-			}
-			return nil, err
-		}
+	result, err := ioutil.ReadAll(f)
+	if err != nil {
+		return nil, err
 	}
+	if result[0] != 0xFF || result[1]>>2 != 0x3E {
+		return nil, ErrorNoSyncCode
+	}
+	return result, nil
 }
 
 func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err error) {
 	block = new(MetaDataBlock)
 	header := make([]byte, 4)
-	_, err = f.Read(header)
+	_, err = io.ReadFull(f, header)
 	if err != nil {
 		return
 	}
@@ -64,19 +57,12 @@ func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err er
 	}
 	length = length << 8 >> 8
 
-	data := bytes.NewBuffer([]byte{})
-
-	var nn int
-	for length > 0 {
-		buf := make([]byte, length)
-		nn, err = f.Read(buf)
-		if err != nil {
-			return
-		}
-		data.Write(buf[:nn])
-		length -= uint32(nn)
+	buf := make([]byte, length)
+	_, err = io.ReadFull(f, buf)
+	if err != nil {
+		return
 	}
-	block.Data = data.Bytes()
+	block.Data = buf
 
 	return
 }
@@ -96,7 +82,7 @@ func readMetadataBlocks(f io.Reader) (blocks []*MetaDataBlock, err error) {
 
 func readFLACHead(f io.Reader) error {
 	buffer := make([]byte, 4)
-	_, err := f.Read(buffer)
+	_, err := io.ReadFull(f, buffer)
 	if err != nil {
 		return err
 	}
