@@ -3,10 +3,11 @@ package flac
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"reflect"
 	"testing"
-
-	httpclient "github.com/ddliu/go-httpclient"
-	"github.com/google/go-cmp/cmp"
 )
 
 func equalBytes(a, b []byte) bool {
@@ -21,18 +22,24 @@ func equalBytes(a, b []byte) bool {
 	return true
 }
 
+func httpGetBytes(url string) ([]byte, error) {
+	res, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != 200 {
+		return nil, fmt.Errorf("HTTP status %d", res.StatusCode)
+	}
+	return ioutil.ReadAll(res.Body)
+}
+
 func TestFLACDecode(t *testing.T) {
-	zipres, err := httpclient.Begin().Get("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
+	zipBytes, err := httpGetBytes("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
 	if err != nil {
 		t.Errorf("Error while downloading test file: %s", err.Error())
 		t.FailNow()
 	}
-	zipdata, err := zipres.ReadAll()
-	if err != nil {
-		t.Errorf("Error while downloading test file: %s", err.Error())
-		t.FailNow()
-	}
-	zipfile, err := zip.NewReader(bytes.NewReader(zipdata), int64(len(zipdata)))
+	zipfile, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	if err != nil {
 		t.Errorf("Error while decompressing test file: %s", err.Error())
 		t.FailNow()
@@ -50,11 +57,11 @@ func TestFLACDecode(t *testing.T) {
 
 	verify := func(f *File) {
 		metadata := [][]int{
-			[]int{0, 34},
-			[]int{4, 149},
-			[]int{6, 58388},
-			[]int{2, 1402},
-			[]int{1, 102},
+			{0, 34},
+			{4, 149},
+			{6, 58388},
+			{2, 1402},
+			{1, 102},
 		}
 
 		for i, meta := range f.Meta {
@@ -88,7 +95,7 @@ func TestFLACDecode(t *testing.T) {
 			t.Error("Streaminfo does not equal.")
 			t.Fail()
 		}
-		if !cmp.Equal(*streaminfo, *expectedstreaminfo) {
+		if !reflect.DeepEqual(*streaminfo, *expectedstreaminfo) {
 			errNotEqual()
 		}
 	}
