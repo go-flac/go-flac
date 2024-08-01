@@ -4,23 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
 )
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func httpGetBytes(url string) ([]byte, error) {
 	res, err := http.Get(url)
@@ -30,7 +18,7 @@ func httpGetBytes(url string) ([]byte, error) {
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP status %d", res.StatusCode)
 	}
-	return ioutil.ReadAll(res.Body)
+	return io.ReadAll(res.Body)
 }
 
 func TestFLACDecode(t *testing.T) {
@@ -52,6 +40,12 @@ func TestFLACDecode(t *testing.T) {
 	flachandle, err := zipfile.File[0].Open()
 	if err != nil {
 		t.Errorf("Failed to decompress test file: %s", err)
+		t.FailNow()
+	}
+
+	flacBytes, err := io.ReadAll(flachandle)
+	if err != nil {
+		t.Errorf("Failed to read flac file: %s", err)
 		t.FailNow()
 	}
 
@@ -100,18 +94,49 @@ func TestFLACDecode(t *testing.T) {
 		}
 	}
 
-	f, err := ParseBytes(flachandle)
+	f, err := ParseBytes(bytes.NewReader(flacBytes))
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
-		t.Fail()
+		t.FailNow()
 	}
 
 	verify(f)
 
-	f, err = ParseBytes(bytes.NewReader(f.Marshal()))
+	loopback := new(bytes.Buffer)
+
+	if _, err := f.WriteTo(loopback); err != nil {
+		t.Errorf("Failed to write flac file: %s", err)
+		t.FailNow()
+	}
+
+	if !bytes.Equal(flacBytes, loopback.Bytes()) {
+		t.Errorf("Loopback data does not match original")
+		t.FailNow()
+	}
+
+	f, err = ParseBytes(loopback)
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
-		t.Fail()
+		t.FailNow()
+	}
+	verify(f)
+
+	newLoopback := new(bytes.Buffer)
+
+	if _, err := f.WriteTo(newLoopback); err != nil {
+		t.Errorf("Failed to write flac file: %s", err)
+		t.FailNow()
+	}
+
+	if !bytes.Equal(flacBytes, newLoopback.Bytes()) {
+		t.Errorf("Loopback data does not match original")
+		t.FailNow()
+	}
+
+	f, err = ParseMetadata(newLoopback)
+	if err != nil {
+		t.Errorf("Failed to parse flac file: %s", err)
+		t.FailNow()
 	}
 	verify(f)
 

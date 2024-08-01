@@ -4,8 +4,36 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 )
+
+type ErrorReader struct {
+	err error
+}
+
+func (e *ErrorReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
+}
+
+type PrefixReader struct {
+	prefix []byte
+	r      io.Reader
+}
+
+func (c *PrefixReader) Read(p []byte) (n int, err error) {
+	if len(c.prefix) == 0 {
+		return c.r.Read(p)
+	}
+	n = copy(p, c.prefix)
+	c.prefix = c.prefix[n:]
+	return
+}
+
+func (c *PrefixReader) Close() error {
+	if closer, ok := c.r.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
 
 func encodeUint32(n uint32) []byte {
 	buf := bytes.NewBuffer([]byte{})
@@ -30,15 +58,18 @@ func readUint32(r io.Reader) (res uint32, err error) {
 	return
 }
 
-func readFLACStream(f io.Reader) ([]byte, error) {
-	result, err := ioutil.ReadAll(f)
+func checkFLACStream(f io.Reader) (io.Reader, error) {
+	first2Bytes := make([]byte, 2)
+	_, err := io.ReadFull(f, first2Bytes)
 	if err != nil {
 		return nil, err
 	}
-	if result[0] != 0xFF || result[1]>>2 != 0x3E {
+
+	if first2Bytes[0] != 0xFF || first2Bytes[1]>>2 != 0x3E {
 		return nil, ErrorNoSyncCode
 	}
-	return result, nil
+
+	return &PrefixReader{prefix: first2Bytes, r: f}, nil
 }
 
 func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err error) {
