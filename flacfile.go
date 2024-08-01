@@ -1,6 +1,7 @@
 package flac
 
 import (
+	"bufio"
 	"io"
 	"os"
 )
@@ -12,6 +13,7 @@ type File struct {
 }
 
 // Marshal encodes all meta tags and returns the content of the resulting whole FLAC file
+// If Frames is not nil, it will be written to the output, and then the File will be closed, further calls to WriteTo will return ErrorAlreadyWritten
 func (c *File) WriteTo(w io.Writer) (int64, error) {
 	nInt, err := w.Write([]byte("fLaC"))
 	n := int64(nInt)
@@ -27,6 +29,10 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 		n += int64(n2)
 	}
 	if c.Frames != nil {
+		defer func() {
+			c.Frames = &ErrorReader{err: ErrorAlreadyWritten}
+		}()
+		defer c.Close()
 		n2, err := io.Copy(w, c.Frames)
 		if err != nil {
 			return n + n2, err
@@ -37,6 +43,7 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 }
 
 // Save encapsulates Marshal and save the file to the file system
+// If Frames is not nil, it will be written to the output, and then the File will be closed, further calls to WriteTo will return ErrorAlreadyWritten
 func (c *File) Save(fn string) error {
 	f, err := os.Create(fn)
 	if err != nil {
@@ -48,7 +55,8 @@ func (c *File) Save(fn string) error {
 }
 
 // ParseMetadata accepts a reader to a FLAC stream and consumes only FLAC metadata
-// Frames is always nil
+// Frames are not read
+// Further calls to WriteTo will only write the metadata
 func ParseMetadata(f io.Reader) (*File, error) {
 	res := new(File)
 
@@ -67,6 +75,7 @@ func ParseMetadata(f io.Reader) (*File, error) {
 
 // ParseBytes accepts a reader to a FLAC stream and returns the final file
 // FLAC audio frames are stored as a reader
+// You should call Close() on the returned File to free resources
 func ParseBytes(f io.Reader) (*File, error) {
 	res, err := ParseMetadata(f)
 	if err != nil {
@@ -83,15 +92,17 @@ func ParseBytes(f io.Reader) (*File, error) {
 
 // ParseFile parses a FLAC file
 // FLAC audio frames are stored as a reader
+// You should call Close() on the returned File to free resources
 func ParseFile(filename string) (*File, error) {
 	f, err := os.Open(filename)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
-	return ParseBytes(f)
+	return ParseBytes(bufio.NewReader(f))
 }
 
+// Close closes the file
+// If the file is already closed, it returns nil
 func (f *File) Close() error {
 	if c, ok := f.Frames.(io.Closer); ok {
 		return c.Close()

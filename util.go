@@ -6,6 +6,35 @@ import (
 	"io"
 )
 
+type ErrorReader struct {
+	err error
+}
+
+func (e *ErrorReader) Read(p []byte) (n int, err error) {
+	return 0, e.err
+}
+
+type PrefixReader struct {
+	prefix []byte
+	r      io.Reader
+}
+
+func (c *PrefixReader) Read(p []byte) (n int, err error) {
+	if len(c.prefix) == 0 {
+		return c.r.Read(p)
+	}
+	n = copy(p, c.prefix)
+	c.prefix = c.prefix[n:]
+	return
+}
+
+func (c *PrefixReader) Close() error {
+	if closer, ok := c.r.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 func encodeUint32(n uint32) []byte {
 	buf := bytes.NewBuffer([]byte{})
 	if err := binary.Write(buf, binary.BigEndian, n); err != nil {
@@ -40,7 +69,7 @@ func checkFLACStream(f io.Reader) (io.Reader, error) {
 		return nil, ErrorNoSyncCode
 	}
 
-	return io.MultiReader(bytes.NewReader(first2Bytes), f), nil
+	return &PrefixReader{prefix: first2Bytes, r: f}, nil
 }
 
 func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err error) {

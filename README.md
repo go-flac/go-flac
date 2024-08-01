@@ -14,12 +14,11 @@ A FLAC(Free Lossless Audio Codec) stream generally consists of 3 parts: a "fLaC"
 
 [go-flac](https://github.com/go-flac/flacpicture) provided three APIs for reading FLAC files and returns a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct:
 
-- [ParseBytes](https://godoc.org/github.com/go-flac/go-flac#ParseBytes) for consuming a whole FLAC stream from an io.Reader.
-- [ParseFile](https://godoc.org/github.com/go-flac/go-flac#ParseFile) for consuming a whole FLAC stream from a file.
-- [ParseMetadata](https://godoc.org/github.com/go-flac/go-flac#ParseMetadata) for consuming only metadata from am io.Reader.
+- [ParseBytes](https://godoc.org/github.com/go-flac/go-flac#ParseBytes) for parsing the FLAC header and metadata blocks from an io.Reader, the audio frames are saved as a reference to the original reader. You are responsible for closing the [File](https://godoc.org/github.com/go-flac/go-flac#File) struct.
+- [ParseFile](https://godoc.org/github.com/go-flac/go-flac#ParseFile) for consuming the FLAC header and metadata blocks from a file. The audio frames are saved as a reference to the original file. You are responsible for closing the [File](https://godoc.org/github.com/go-flac/go-flac#File) struct.
+- [ParseMetadata](https://godoc.org/github.com/go-flac/go-flac#ParseMetadata) for consuming only metadata from an io.Reader. Calls to [WriteTo](https://godoc.org/github.com/go-flac/go-flac#File.WriteTo) and [Save](https://godoc.org/github.com/go-flac/go-flac#File.Save) will only write the metadata blocks to the io.Writer.
 
-
-The [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct has two exported fields, Meta and Frames, the Frames consisted of raw stream data and the Meta field was a slice of all MetaDataBlocks present in the file. Other packages could parse/construct a [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock) by inspecting its Type field and apply proper decoding/encoding on the Data field of the [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock). You can modify the elements in the Meta field of a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) as you like, as long as the StreamInfo metadata block is the first element in Meta field, according to the [specs](https://xiph.org/flac/format.html) of FLAC format.
+The [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) struct has two exported fields, Meta and Frames, the Frames consisted of raw stream as a reader and the Meta field was a slice of all MetaDataBlocks present in the file. Other packages could parse/construct a [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock) by inspecting its Type field and apply proper decoding/encoding on the Data field of the [MetadataBlock](https://godoc.org/github.com/go-flac/go-flac#MetaDataBlock). You can modify the elements in the Meta field of a [File](https://godoc.org/github.com/go-flac/go-flac#ParseFile) as you like, as long as the StreamInfo metadata block is the first element in Meta field, according to the [specs](https://xiph.org/flac/format.html) of FLAC format.
 
 ## Examples
 The following example extracts the sample rate of a FLAC file.

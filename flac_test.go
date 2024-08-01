@@ -43,6 +43,12 @@ func TestFLACDecode(t *testing.T) {
 		t.FailNow()
 	}
 
+	flacBytes, err := io.ReadAll(flachandle)
+	if err != nil {
+		t.Errorf("Failed to read flac file: %s", err)
+		t.FailNow()
+	}
+
 	verify := func(f *File) {
 		metadata := [][]int{
 			{0, 34},
@@ -88,22 +94,49 @@ func TestFLACDecode(t *testing.T) {
 		}
 	}
 
-	f, err := ParseBytes(flachandle)
+	f, err := ParseBytes(bytes.NewReader(flacBytes))
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
-		t.Fail()
+		t.FailNow()
 	}
 
 	verify(f)
 
 	loopback := new(bytes.Buffer)
 
-	f.WriteTo(loopback)
+	if _, err := f.WriteTo(loopback); err != nil {
+		t.Errorf("Failed to write flac file: %s", err)
+		t.FailNow()
+	}
+
+	if !bytes.Equal(flacBytes, loopback.Bytes()) {
+		t.Errorf("Loopback data does not match original")
+		t.FailNow()
+	}
 
 	f, err = ParseBytes(loopback)
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
-		t.Fail()
+		t.FailNow()
+	}
+	verify(f)
+
+	newLoopback := new(bytes.Buffer)
+
+	if _, err := f.WriteTo(newLoopback); err != nil {
+		t.Errorf("Failed to write flac file: %s", err)
+		t.FailNow()
+	}
+
+	if !bytes.Equal(flacBytes, newLoopback.Bytes()) {
+		t.Errorf("Loopback data does not match original")
+		t.FailNow()
+	}
+
+	f, err = ParseMetadata(newLoopback)
+	if err != nil {
+		t.Errorf("Failed to parse flac file: %s", err)
+		t.FailNow()
 	}
 	verify(f)
 

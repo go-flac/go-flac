@@ -11,4 +11,6 @@ var (
 	ErrorStreamInfoEarlyEOF = errors.New("unexpected end of stream while reading stream info")
 	// ErrorNoSyncCode indicates that the frames are malformed as the sync code is not present after the last Metablock
 	ErrorNoSyncCode = errors.New("frames do not begin with sync code")
+	// ErrorAlreadyWritten indicates that the frames have already been written to the file
+	ErrorAlreadyWritten = errors.New("frames already written")
 )
