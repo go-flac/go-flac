@@ -4,23 +4,11 @@ import (
 	"archive/zip"
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"reflect"
 	"testing"
 )
-
-func equalBytes(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func httpGetBytes(url string) ([]byte, error) {
 	res, err := http.Get(url)
@@ -30,7 +18,7 @@ func httpGetBytes(url string) ([]byte, error) {
 	if res.StatusCode != 200 {
 		return nil, fmt.Errorf("HTTP status %d", res.StatusCode)
 	}
-	return ioutil.ReadAll(res.Body)
+	return io.ReadAll(res.Body)
 }
 
 func TestFLACDecode(t *testing.T) {
@@ -108,7 +96,11 @@ func TestFLACDecode(t *testing.T) {
 
 	verify(f)
 
-	f, err = ParseBytes(bytes.NewReader(f.Marshal()))
+	loopback := new(bytes.Buffer)
+
+	f.WriteTo(loopback)
+
+	f, err = ParseBytes(loopback)
 	if err != nil {
 		t.Errorf("Failed to parse flac file: %s", err)
 		t.Fail()

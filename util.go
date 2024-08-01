@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"io"
-	"io/ioutil"
 )
 
 func encodeUint32(n uint32) []byte {
@@ -30,15 +29,18 @@ func readUint32(r io.Reader) (res uint32, err error) {
 	return
 }
 
-func readFLACStream(f io.Reader) ([]byte, error) {
-	result, err := ioutil.ReadAll(f)
+func checkFLACStream(f io.Reader) (io.Reader, error) {
+	first2Bytes := make([]byte, 2)
+	_, err := io.ReadFull(f, first2Bytes)
 	if err != nil {
 		return nil, err
 	}
-	if result[0] != 0xFF || result[1]>>2 != 0x3E {
+
+	if first2Bytes[0] != 0xFF || first2Bytes[1]>>2 != 0x3E {
 		return nil, ErrorNoSyncCode
 	}
-	return result, nil
+
+	return io.MultiReader(bytes.NewReader(first2Bytes), f), nil
 }
 
 func parseMetadataBlock(f io.Reader) (block *MetaDataBlock, isfinal bool, err error) {
