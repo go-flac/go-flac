@@ -28,7 +28,7 @@ The following example extracts the sample rate of a FLAC file.
 package example
 
 import (
-    "github.com/go-flac/go-flac"
+    "github.com/go-flac/go-flac/v2"
 )
 
 func getSampleRate(fileName string) int {
@@ -51,7 +51,7 @@ package example
 
 import (
     "github.com/go-flac/flacpicture"
-    "github.com/go-flac/go-flac"
+    "github.com/go-flac/go-flac/v2"
 )
 
 func addFLACCover(fileName string, imgData []byte) {
