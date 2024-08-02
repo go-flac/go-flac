@@ -1,6 +1,6 @@
 # go-flac
 
-[![Documentation](https://godoc.org/github.com/go-flac/go-flac?status.svg)](https://godoc.org/github.com/go-flac/go-flac)
+[![Documentation](https://godoc.org/github.com/go-flac/go-flac?status.svg)](https://godoc.org/github.com/go-flac/go-flac/v2)
 [![Build Status](https://travis-ci.org/go-flac/go-flac.svg?branch=master)](https://travis-ci.org/go-flac/go-flac)
 [![Coverage Status](https://coveralls.io/repos/github/go-flac/go-flac/badge.svg?branch=master)](https://coveralls.io/github/go-flac/go-flac?branch=master)
 
