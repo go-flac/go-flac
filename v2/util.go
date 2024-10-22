@@ -1,10 +1,25 @@
 package flac
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"io"
+	"os"
 )
+
+type BufIOWithInner struct {
+	inner io.Reader
+	Buf   *bufio.Reader
+}
+
+func NewBufIOWithInner(inner io.Reader) *BufIOWithInner {
+	return &BufIOWithInner{inner: inner, Buf: bufio.NewReader(inner)}
+}
+
+func (b *BufIOWithInner) Read(p []byte) (n int, err error) {
+	return b.Buf.Read(p)
+}
 
 type ErrorReader struct {
 	err error
@@ -12,6 +27,17 @@ type ErrorReader struct {
 
 func (e *ErrorReader) Read(p []byte) (n int, err error) {
 	return 0, e.err
+}
+
+func isFileBacked(r io.Reader) *os.File {
+	if f, ok := r.(*os.File); ok {
+		return f
+	} else if p, ok := r.(*PrefixReader); ok {
+		return isFileBacked(p.r)
+	} else if b, ok := r.(*BufIOWithInner); ok {
+		return isFileBacked(b.inner)
+	}
+	return nil
 }
 
 type PrefixReader struct {

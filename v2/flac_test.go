@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
 )
@@ -21,31 +22,59 @@ func httpGetBytes(url string) ([]byte, error) {
 	return io.ReadAll(res.Body)
 }
 
-func TestFLACDecode(t *testing.T) {
-	zipBytes, err := httpGetBytes("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
+func downloadTestFile(url string) ([]byte, error) {
+	zipBytes, err := httpGetBytes(url)
 	if err != nil {
-		t.Errorf("Error while downloading test file: %s", err.Error())
-		t.FailNow()
+		return nil, err
 	}
 	zipfile, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
 	if err != nil {
-		t.Errorf("Error while decompressing test file: %s", err.Error())
-		t.FailNow()
+		return nil, err
 	}
 	if zipfile.File[0].Name != "Sample_BeeMoved_96kHz24bit.flac" {
-		t.Errorf("Unexpected test file content: %s", zipfile.File[0].Name)
-		t.FailNow()
+		return nil, fmt.Errorf("Unexpected test file content: %s", zipfile.File[0].Name)
 	}
-
 	flachandle, err := zipfile.File[0].Open()
 	if err != nil {
-		t.Errorf("Failed to decompress test file: %s", err)
+		return nil, err
+	}
+	return io.ReadAll(flachandle)
+}
+
+func TestSelfSaveFails(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "flac")
+	if err != nil {
+		t.Errorf("Failed to create temporary file: %s", err)
+		t.FailNow()
+	}
+	defer tmpFile.Close()
+	defer os.Remove(tmpFile.Name())
+
+	flacBytes, err := downloadTestFile("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
+	if err != nil {
+		t.Errorf("Error while downloading test file: %s", err.Error())
+	}
+
+	if _, err := io.Copy(tmpFile, bytes.NewReader(flacBytes)); err != nil {
+		t.Errorf("Failed to write flac file: %s", err)
 		t.FailNow()
 	}
 
-	flacBytes, err := io.ReadAll(flachandle)
+	f, err := ParseFile(tmpFile.Name())
 	if err != nil {
-		t.Errorf("Failed to read flac file: %s", err)
+		t.Errorf("Failed to parse flac file: %s", err)
+	}
+
+	if err := f.Save(tmpFile.Name()); err == nil {
+		t.Errorf("Save should have failed")
+		t.FailNow()
+	}
+}
+
+func TestFLACDecode(t *testing.T) {
+	flacBytes, err := downloadTestFile("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
+	if err != nil {
+		t.Errorf("Error while downloading test file: %s", err.Error())
 		t.FailNow()
 	}
 

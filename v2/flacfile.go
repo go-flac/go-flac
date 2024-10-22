@@ -1,7 +1,7 @@
 package flac
 
 import (
-	"bufio"
+	"fmt"
 	"io"
 	"os"
 )
@@ -42,14 +42,32 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 	return n, nil
 }
 
-// Save encapsulates Marshal and save the file to the file system
-// If Frames is not nil, it will be written to the output, and then the File will be closed, further calls to WriteTo will return ErrorAlreadyWritten
+// Save encapsulates WriteTo by writing the edited metadata to the given path and then piping the audio stream to the output file.
+// The output must not feed back into the input as the data will be corrupted when piping the audio stream.
+// This is commonly caused by attempting to save the file to the same location as the input file.
+// The only information this library have is an io.Reader so it is impossible to reliably detect such cases.
+// Thus caller should implement logic to prevent such cases.
 func (c *File) Save(fn string) error {
 	f, err := os.Create(fn)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create FLAC output file: %w", err)
 	}
 	defer f.Close()
+
+	if fileIn := isFileBacked(c.Frames); fileIn != nil {
+		fileInInfo, err := fileIn.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to get input file info: %w", err)
+		}
+		fileOutInfo, err := f.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to get output file info: %w", err)
+		}
+		if os.SameFile(fileInInfo, fileOutInfo) {
+			return fmt.Errorf("output file must not be the same as the input file")
+		}
+	}
+
 	_, err = c.WriteTo(f)
 	return err
 }
@@ -98,7 +116,7 @@ func ParseFile(filename string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseBytes(bufio.NewReader(f))
+	return ParseBytes(NewBufIOWithInner(f))
 }
 
 // Close closes the file
