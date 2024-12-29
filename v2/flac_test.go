@@ -65,9 +65,31 @@ func TestSelfSaveFails(t *testing.T) {
 		t.Errorf("Failed to parse flac file: %s", err)
 	}
 
+	filePtr := isFileBacked(f.Frames)
+	if filePtr == nil {
+		t.Errorf("File should be backed by a file")
+		t.FailNow()
+	}
+	fd := filePtr.Fd()
+
+	if file := os.NewFile(fd, "flac"); file == nil {
+		t.Errorf("File should be open after calling ParseFile")
+		t.FailNow()
+	}
+
 	if err := f.Save(tmpFile.Name()); err == nil {
 		t.Errorf("Save should have failed")
 		t.FailNow()
+	}
+
+	if err := f.Close(); err != nil {
+		t.Errorf("Failed to close flac file: %s", err)
+	}
+
+	if file := os.NewFile(fd, "flac"); file != nil {
+		if err := file.Close(); err == nil {
+			t.Errorf("File should have been closed after calling Close")
+		}
 	}
 }
 

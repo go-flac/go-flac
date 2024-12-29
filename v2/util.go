@@ -21,6 +21,13 @@ func (b *BufIOWithInner) Read(p []byte) (n int, err error) {
 	return b.Buf.Read(p)
 }
 
+func (b *BufIOWithInner) Close() error {
+	if closer, ok := b.inner.(io.Closer); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 type ErrorReader struct {
 	err error
 }
