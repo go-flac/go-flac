@@ -1,10 +1,11 @@
 package flac
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 )
 
 // File represents a handler of FLAC file
@@ -74,36 +75,95 @@ func (c *File) Save(fn string) error {
 
 // saveInPlace performs a safe overwrite of the original file using a temporary file.
 func (c *File) saveInPlace(originalFile *os.File, originalStat os.FileInfo) error {
-	dir := filepath.Dir(originalFile.Name())
-	tempFile, err := os.CreateTemp(dir, "go-flac-*.tmp")
+	// close original so we can do rw
+	if err := c.Close(); err != nil {
+		return fmt.Errorf("warning: could not close original file handle: %v\n", err)
+	}
+	file, err := os.OpenFile(originalFile.Name(), os.O_RDWR, originalStat.Mode())
 	if err != nil {
-		return fmt.Errorf("failed to create temporary file: %w", err)
+		return fmt.Errorf("failed to reopen file for writing: %w", err)
 	}
 
-	shouldRemoveTemp := true
-	defer func() {
-		if shouldRemoveTemp {
-			_ = os.Remove(tempFile.Name())
+	// i don't want bother calculating header size. so just ParseMetadata
+	_, err = ParseMetadata(file)
+	if err != nil {
+		return fmt.Errorf("failed to parse metadata: %w", err)
+	}
+	originalHeaderSize, err := file.Seek(0, io.SeekCurrent)
+
+	var newMetaBuf bytes.Buffer
+	c.Frames = nil
+	newHeaderSize, err := c.WriteTo(&newMetaBuf)
+	if err != nil {
+		return err
+	}
+
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+	totalSize := stat.Size()
+	audioDataSize := totalSize - originalHeaderSize
+	if audioDataSize < 0 {
+		return errors.New("invalid file format: calculated audio size is negative")
+	}
+
+	delta := newHeaderSize - originalHeaderSize
+	bufferSize := int64(256 * 1024) // 256KB buffer
+
+	// New metadata is larger, shirt forward
+	if delta > 0 {
+		if err := file.Truncate(totalSize + delta); err != nil {
+			return fmt.Errorf("failed to expand file: %w", err)
 		}
-	}()
-
-	if err := tempFile.Chmod(originalStat.Mode()); err != nil {
-		return fmt.Errorf("failed to set permissions on temporary file: %w", err)
+		// copy data from end-to-start to avoid overwriting.
+		for i := int64(0); i < audioDataSize; i += bufferSize {
+			readOffset := audioDataSize - i - bufferSize
+			chunkSize := bufferSize
+			if readOffset < 0 {
+				chunkSize += readOffset
+				readOffset = 0
+			}
+			readPos := originalHeaderSize + readOffset
+			writePos := readPos + delta
+			buf := make([]byte, chunkSize)
+			if _, err := file.ReadAt(buf, readPos); err != nil {
+				return fmt.Errorf("read error during data shift: %w", err)
+			}
+			if _, err := file.WriteAt(buf, writePos); err != nil {
+				return fmt.Errorf("write error during data shift: %w", err)
+			}
+		}
+	} else if delta < 0 {
+		// copy data from start-to-end.
+		for i := int64(0); i < audioDataSize; i += bufferSize {
+			readPos := originalHeaderSize + i
+			writePos := readPos + delta
+			chunkSize := bufferSize
+			if readPos+chunkSize > totalSize {
+				chunkSize = totalSize - readPos
+			}
+			if chunkSize <= 0 {
+				break
+			}
+			buf := make([]byte, chunkSize)
+			if _, err := file.ReadAt(buf, readPos); err != nil && err != io.EOF {
+				return fmt.Errorf("read error during data shift: %w", err)
+			}
+			if _, err := file.WriteAt(buf, writePos); err != nil {
+				return fmt.Errorf("write error during data shift: %w", err)
+			}
+		}
+		if err := file.Truncate(totalSize + delta); err != nil {
+			return fmt.Errorf("failed to shrink file: %w", err)
+		}
+	}
+	// otherwise just write the header lol
+	if _, err := file.WriteAt(newMetaBuf.Bytes(), 0); err != nil {
+		return fmt.Errorf("failed to write new metadata: %w", err)
 	}
 
-	if _, err := c.WriteTo(tempFile); err != nil {
-		return fmt.Errorf("failed to write to temporary file: %w", err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("failed to close temporary file before rename: %w", err)
-	}
-	if err := os.Rename(tempFile.Name(), originalFile.Name()); err != nil {
-		return fmt.Errorf("failed to rename temporary file to original: %w", err)
-	}
-	shouldRemoveTemp = false
-
-	// since WriteTo close already. might unnecessary to recover Frame
-	return nil
+	return file.Close()
 }
 
 // ParseMetadata accepts a reader to a FLAC stream and consumes only FLAC metadata
