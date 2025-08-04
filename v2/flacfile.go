@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 )
 
 // File represents a handler of FLAC file
@@ -48,28 +49,61 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 // The only information this library have is an io.Reader so it is impossible to reliably detect such cases.
 // Thus caller should implement logic to prevent such cases.
 func (c *File) Save(fn string) error {
+	if fileIn := isFileBacked(c.Frames); fileIn != nil {
+		fileInInfo, err := fileIn.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to get input file info: %w", err)
+		}
+		fileOutInfo, err := os.Stat(fn)
+		if err != nil {
+			return fmt.Errorf("failed to get output file info: %w", err)
+		}
+		if os.SameFile(fileInInfo, fileOutInfo) {
+			return c.saveInPlace(fileIn, fileInInfo)
+		}
+	}
 	f, err := os.Create(fn)
 	if err != nil {
 		return fmt.Errorf("failed to create FLAC output file: %w", err)
 	}
 	defer f.Close()
 
-	if fileIn := isFileBacked(c.Frames); fileIn != nil {
-		fileInInfo, err := fileIn.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to get input file info: %w", err)
-		}
-		fileOutInfo, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to get output file info: %w", err)
-		}
-		if os.SameFile(fileInInfo, fileOutInfo) {
-			return fmt.Errorf("output file must not be the same as the input file")
-		}
-	}
-
 	_, err = c.WriteTo(f)
 	return err
+}
+
+// saveInPlace performs a safe overwrite of the original file using a temporary file.
+func (c *File) saveInPlace(originalFile *os.File, originalStat os.FileInfo) error {
+	dir := filepath.Dir(originalFile.Name())
+	tempFile, err := os.CreateTemp(dir, "go-flac-*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file: %w", err)
+	}
+
+	shouldRemoveTemp := true
+	defer func() {
+		if shouldRemoveTemp {
+			_ = os.Remove(tempFile.Name())
+		}
+	}()
+
+	if err := tempFile.Chmod(originalStat.Mode()); err != nil {
+		return fmt.Errorf("failed to set permissions on temporary file: %w", err)
+	}
+
+	if _, err := c.WriteTo(tempFile); err != nil {
+		return fmt.Errorf("failed to write to temporary file: %w", err)
+	}
+	if err := tempFile.Close(); err != nil {
+		return fmt.Errorf("failed to close temporary file before rename: %w", err)
+	}
+	if err := os.Rename(tempFile.Name(), originalFile.Name()); err != nil {
+		return fmt.Errorf("failed to rename temporary file to original: %w", err)
+	}
+	shouldRemoveTemp = false
+
+	// since WriteTo close already. might unnecessary to recover Frame
+	return nil
 }
 
 // ParseMetadata accepts a reader to a FLAC stream and consumes only FLAC metadata
