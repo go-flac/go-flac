@@ -3,10 +3,13 @@ package flac
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/sha256"
 	"fmt"
+	"github.com/stretchr/testify/require"
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -191,4 +194,103 @@ func TestFLACDecode(t *testing.T) {
 	}
 	verify(f)
 
+}
+
+func helperGetAudioDataFromBytes(t *testing.T, flacData []byte) []byte {
+	t.Helper()
+	file, err := ParseBytes(bytes.NewReader(flacData))
+	require.NoError(t, err, "ParseBytes should not fail when getting audio data")
+	defer file.Close()
+
+	audio, err := io.ReadAll(file.Frames)
+	require.NoError(t, err, "Should be able to read all audio frames")
+	return audio
+}
+
+func helperGetFileHash(t *testing.T, filePath string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filePath)
+	require.NoError(t, err, "Failed to read file for hashing")
+	hash := sha256.Sum256(data)
+	return hash[:]
+}
+
+// TestInPlaceSave tests the file-shifting logic for saving over the same file using a real FLAC file.
+func TestInPlaceSave(t *testing.T) {
+	sourceFlacBytes, err := os.ReadFile("../testdata/data.flac")
+	require.NoError(t, err, "Should be able to read the source FLAC file")
+
+	originalAudioData := helperGetAudioDataFromBytes(t, sourceFlacBytes)
+	require.NotEmpty(t, originalAudioData, "Original audio data should not be empty")
+
+	originalFile, err := ParseBytes(bytes.NewReader(sourceFlacBytes))
+	require.NoError(t, err)
+	originalMetaBlockCount := len(originalFile.Meta)
+	originalFile.Close()
+
+	t.Run("Larger Metadata (Expand File)", func(t *testing.T) {
+		tempFilePath := filepath.Join(t.TempDir(), "test.flac")
+		err := os.WriteFile(tempFilePath, sourceFlacBytes, 0644)
+		require.NoError(t, err)
+
+		file, err := ParseFile(tempFilePath)
+		require.NoError(t, err, "ParseFile of temp copy should succeed")
+
+		file.Meta = append(file.Meta, &MetaDataBlock{})
+		require.Len(t, file.Meta, originalMetaBlockCount+1, "Metadata block count should be incremented")
+
+		err = file.Save(tempFilePath)
+		require.NoError(t, err, "Save() should not fail")
+
+		savedFileBytes, err := os.ReadFile(tempFilePath)
+		require.NoError(t, err)
+		savedAudioData := helperGetAudioDataFromBytes(t, savedFileBytes)
+		require.Equal(t, originalAudioData, savedAudioData, "Audio data was corrupted during in-place save (expand)")
+
+		finalFile, err := ParseFile(tempFilePath)
+		require.NoError(t, err)
+		require.Len(t, finalFile.Meta, originalMetaBlockCount+1, "Final file should have the new metadata block count")
+		finalFile.Close()
+	})
+
+	t.Run("Smaller Metadata (Shrink File)", func(t *testing.T) {
+		tempFilePath := filepath.Join(t.TempDir(), "test.flac")
+		err := os.WriteFile(tempFilePath, sourceFlacBytes, 0644)
+		require.NoError(t, err)
+
+		file, err := ParseFile(tempFilePath)
+		require.NoError(t, err)
+
+		require.Greater(t, len(file.Meta), 1, "Original file must have more than 1 meta block to shrink")
+		file.Meta = file.Meta[:len(file.Meta)-1]
+		require.Len(t, file.Meta, originalMetaBlockCount-1)
+
+		err = file.Save(tempFilePath)
+		require.NoError(t, err, "Save() should not fail")
+
+		savedFileBytes, err := os.ReadFile(tempFilePath)
+		require.NoError(t, err)
+		savedAudioData := helperGetAudioDataFromBytes(t, savedFileBytes)
+		require.Equal(t, originalAudioData, savedAudioData, "Audio data was corrupted during in-place save (shrink)")
+
+		finalFile, err := ParseFile(tempFilePath)
+		require.NoError(t, err)
+		require.Len(t, finalFile.Meta, originalMetaBlockCount-1)
+		finalFile.Close()
+	})
+
+	t.Run("Same Size Metadata (No Change)", func(t *testing.T) {
+		tempFilePath := filepath.Join(t.TempDir(), "test.flac")
+		err := os.WriteFile(tempFilePath, sourceFlacBytes, 0644)
+		require.NoError(t, err)
+
+		file, err := ParseFile(tempFilePath)
+		require.NoError(t, err)
+
+		err = file.Save(tempFilePath)
+		require.NoError(t, err)
+
+		hash := sha256.Sum256(sourceFlacBytes)
+		require.Equal(t, hash[:], helperGetFileHash(t, tempFilePath), "File content should be identical when saved with no changes")
+	})
 }
