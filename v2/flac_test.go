@@ -1,105 +1,36 @@
 package flac
 
 import (
-	"archive/zip"
 	"bytes"
-	"fmt"
+	_ "embed"
 	"io"
-	"net/http"
 	"os"
 	"reflect"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func httpGetBytes(url string) ([]byte, error) {
-	res, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode != 200 {
-		return nil, fmt.Errorf("HTTP status %d", res.StatusCode)
-	}
-	return io.ReadAll(res.Body)
-}
+//go:embed sample_header_truncated.flac
+var sampleFileBytes []byte
 
-func downloadTestFile(url string) ([]byte, error) {
-	zipBytes, err := httpGetBytes(url)
-	if err != nil {
-		return nil, err
+func consumeReaderAssertEqual(t *testing.T, lh io.Reader, rh io.Reader) {
+	lhBytes, err := io.ReadAll(lh)
+	require.NoError(t, err)
+	rhBytes, err := io.ReadAll(rh)
+	require.NoError(t, err)
+	require.Equal(t, lhBytes, rhBytes)
+	if closer, ok := lh.(io.Closer); ok {
+		closer.Close()
 	}
-	zipfile, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
-	if err != nil {
-		return nil, err
-	}
-	if zipfile.File[0].Name != "Sample_BeeMoved_96kHz24bit.flac" {
-		return nil, fmt.Errorf("Unexpected test file content: %s", zipfile.File[0].Name)
-	}
-	flachandle, err := zipfile.File[0].Open()
-	if err != nil {
-		return nil, err
-	}
-	return io.ReadAll(flachandle)
-}
-
-func TestSelfSaveFails(t *testing.T) {
-	tmpFile, err := os.CreateTemp("", "flac")
-	if err != nil {
-		t.Errorf("Failed to create temporary file: %s", err)
-		t.FailNow()
-	}
-	defer tmpFile.Close()
-	defer os.Remove(tmpFile.Name())
-
-	flacBytes, err := downloadTestFile("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
-	if err != nil {
-		t.Errorf("Error while downloading test file: %s", err.Error())
-	}
-
-	if _, err := io.Copy(tmpFile, bytes.NewReader(flacBytes)); err != nil {
-		t.Errorf("Failed to write flac file: %s", err)
-		t.FailNow()
-	}
-
-	f, err := ParseFile(tmpFile.Name())
-	if err != nil {
-		t.Errorf("Failed to parse flac file: %s", err)
-	}
-
-	filePtr := isFileBacked(f.Frames)
-	if filePtr == nil {
-		t.Errorf("File should be backed by a file")
-		t.FailNow()
-	}
-	fd := filePtr.Fd()
-
-	if file := os.NewFile(fd, "flac"); file == nil {
-		t.Errorf("File should be open after calling ParseFile")
-		t.FailNow()
-	}
-
-	if err := f.Save(tmpFile.Name()); err == nil {
-		t.Errorf("Save should have failed")
-		t.FailNow()
-	}
-
-	if err := f.Close(); err != nil {
-		t.Errorf("Failed to close flac file: %s", err)
-	}
-
-	if file := os.NewFile(fd, "flac"); file != nil {
-		if err := file.Close(); err == nil {
-			t.Errorf("File should have been closed after calling Close")
-		}
+	if closer, ok := rh.(io.Closer); ok {
+		closer.Close()
 	}
 }
 
 func TestFLACDecode(t *testing.T) {
-	flacBytes, err := downloadTestFile("http://helpguide.sony.net/high-res/sample1/v1/data/Sample_BeeMoved_96kHz24bit.flac.zip")
-	if err != nil {
-		t.Errorf("Error while downloading test file: %s", err.Error())
-		t.FailNow()
-	}
-
+	flacBytes := sampleFileBytes[:]
 	verify := func(f *File) {
 		metadata := [][]int{
 			{0, 34},
@@ -191,4 +122,100 @@ func TestFLACDecode(t *testing.T) {
 	}
 	verify(f)
 
+}
+
+func helperGetAudioDataFromBytes(t *testing.T, flacData []byte) []byte {
+	t.Helper()
+	file, err := ParseBytes(bytes.NewReader(flacData))
+	require.NoError(t, err, "ParseBytes should not fail when getting audio data")
+	defer file.Close()
+
+	audio, err := io.ReadAll(file.Frames)
+	require.NoError(t, err, "Should be able to read all audio frames")
+	return audio
+}
+
+// TestFileSave tests the file saving (including in-place and out-of-place) logic for saving over the same file using a real FLAC file.
+func TestFileSave(t *testing.T) {
+	sourceFlacBytes := sampleFileBytes[:]
+
+	originalAudioData := helperGetAudioDataFromBytes(t, sourceFlacBytes)
+	require.NotEmpty(t, originalAudioData, "Original audio data should not be empty")
+
+	originalFile, err := ParseBytes(bytes.NewReader(sourceFlacBytes))
+	require.NoError(t, err)
+	originalMetaBlockCount := len(originalFile.Meta)
+	originalFile.Close()
+
+	var pattern = make([]byte, 512<<10+2)
+	for i := range pattern {
+		pattern[i] = byte(i % 53)
+	}
+
+	t.Run("Roundtrip Metadata Alter and Save", func(t *testing.T) {
+		paddingLenBase := 1
+		for paddingLenBase < 512<<10 {
+			paddingLenBase *= 2
+
+			for paddingLenDelta := -2; paddingLenDelta <= 2; paddingLenDelta++ {
+				paddingLen := paddingLenBase + paddingLenDelta
+
+				tempFile, err := os.CreateTemp("", "*_test_input.flac")
+				require.NoError(t, err)
+				_, err = tempFile.Write(sourceFlacBytes)
+				require.NoError(t, err)
+				tempFilePath := tempFile.Name()
+				tempFile.Close()
+
+				symLinkFile := tempFilePath[:len(tempFilePath)-len("_test_input.flac")] + "_test_input.flac.link"
+				err = os.Symlink(tempFilePath, symLinkFile)
+				require.NoError(t, err)
+
+				outOfPlaceFilePath := tempFilePath[:len(tempFilePath)-len("_test_input.flac")] + "_test_output.flac"
+
+				for _, outputFilePath := range []string{tempFilePath, symLinkFile, outOfPlaceFilePath} {
+					require.NoError(t, err)
+
+					file, err := ParseFile(tempFilePath)
+					require.NoError(t, err, "ParseFile of temp copy should succeed")
+
+					file.Meta = append(file.Meta, &MetaDataBlock{
+						Type: Padding,
+						Data: pattern[:paddingLen],
+					})
+					require.Len(t, file.Meta, originalMetaBlockCount+1, "Metadata block count should be incremented")
+
+					err = file.Save(outputFilePath) // save the file back out, this time expanding the file
+					require.NoError(t, err, "Save() should not fail")
+
+					savedFileBytes, err := os.ReadFile(outputFilePath)
+					require.NoError(t, err)
+					savedAudioData := helperGetAudioDataFromBytes(t, savedFileBytes)
+					require.Equal(t, originalAudioData, savedAudioData, "Audio data was corrupted during in-place save (expand)")
+					consumeReaderAssertEqual(t, bytes.NewReader(originalAudioData), bytes.NewReader(savedAudioData))
+
+					finalFile, err := ParseFile(outputFilePath)
+					require.NoError(t, err)
+					require.Len(t, finalFile.Meta, originalMetaBlockCount+1, "Final file should have the new metadata block count")
+
+					var lastPaddingIndex int
+					for i, meta := range finalFile.Meta {
+						if meta.Type == Padding {
+							lastPaddingIndex = i
+						}
+					}
+					require.Equal(t, paddingLen, len(finalFile.Meta[lastPaddingIndex].Data), "Padding length should be equal to the original padding length, paddingLen=%d", paddingLen)
+					finalFile.Meta = append(finalFile.Meta[:lastPaddingIndex], finalFile.Meta[lastPaddingIndex+1:]...) // take the block back out
+					err = finalFile.Save(outputFilePath)                                                               // save the file back out, this time shortening the file
+					require.NoError(t, err)
+					finalFile.Close()
+
+					finalFileBytes, err := os.ReadFile(outputFilePath)
+					require.NoError(t, err)
+					assert.Equal(t, sourceFlacBytes, finalFileBytes, "Final file should be identical to the original")
+				}
+			}
+		}
+
+	})
 }

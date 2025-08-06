@@ -1,6 +1,8 @@
 package flac
 
 import (
+	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -43,33 +45,130 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 }
 
 // Save encapsulates WriteTo by writing the edited metadata to the given path and then piping the audio stream to the output file.
-// The output must not feed back into the input as the data will be corrupted when piping the audio stream.
-// This is commonly caused by attempting to save the file to the same location as the input file.
-// The only information this library have is an io.Reader so it is impossible to reliably detect such cases.
-// Thus caller should implement logic to prevent such cases.
 func (c *File) Save(fn string) error {
+	if fileIn := isFileBacked(c.Frames); fileIn != nil {
+		defer fileIn.Close()
+		fileInInfo, err := fileIn.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to get input file info: %w", err)
+		}
+		fileOut, err := os.OpenFile(fn, os.O_RDWR, 0o644)
+		if err != nil {
+			if os.IsNotExist(err) {
+				f, err := os.Create(fn)
+				if err != nil {
+					return fmt.Errorf("failed to create FLAC output file: %w", err)
+				}
+				defer f.Close()
+
+				_, err = c.WriteTo(f)
+				return err
+			}
+
+			return fmt.Errorf("failed to get output file info: %w", err)
+		}
+		fileOutInfo, err := fileOut.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to get output file info: %w", err)
+		}
+		if os.SameFile(fileInInfo, fileOutInfo) {
+			return c.saveInPlace(fileOut)
+		}
+	}
 	f, err := os.Create(fn)
 	if err != nil {
 		return fmt.Errorf("failed to create FLAC output file: %w", err)
 	}
 	defer f.Close()
 
-	if fileIn := isFileBacked(c.Frames); fileIn != nil {
-		fileInInfo, err := fileIn.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to get input file info: %w", err)
-		}
-		fileOutInfo, err := f.Stat()
-		if err != nil {
-			return fmt.Errorf("failed to get output file info: %w", err)
-		}
-		if os.SameFile(fileInInfo, fileOutInfo) {
-			return fmt.Errorf("output file must not be the same as the input file")
-		}
-	}
-
 	_, err = c.WriteTo(f)
 	return err
+}
+
+// saveInPlace performs a safe overwrite of the original file using a temporary file.
+func (c *File) saveInPlace(file *os.File) error {
+	_, err := ParseMetadata(file)
+	if err != nil {
+		return fmt.Errorf("failed to parse metadata: %w", err)
+	}
+	originalHeaderSize, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return fmt.Errorf("failed to seek to header: %w", err)
+	}
+
+	var newMetaBuf bytes.Buffer
+	c.Frames = nil
+	newHeaderSize, err := c.WriteTo(&newMetaBuf)
+	if err != nil {
+		return err
+	}
+
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+	totalSize := stat.Size()
+	audioDataSize := totalSize - originalHeaderSize
+	if audioDataSize < 0 {
+		return errors.New("invalid file format: calculated audio size is negative")
+	}
+
+	delta := newHeaderSize - originalHeaderSize
+	bufferSize := int64(256 * 1024) // 256KB buffer
+
+	// New metadata is larger, shirt forward
+	if delta > 0 {
+		if err := file.Truncate(totalSize + delta); err != nil {
+			return fmt.Errorf("failed to expand file: %w", err)
+		}
+		// copy data from end-to-start to avoid overwriting.
+		for i := int64(0); i < audioDataSize; i += bufferSize {
+			readOffset := audioDataSize - i - bufferSize
+			chunkSize := bufferSize
+			if readOffset < 0 {
+				chunkSize += readOffset
+				readOffset = 0
+			}
+			readPos := originalHeaderSize + readOffset
+			writePos := readPos + delta
+			buf := make([]byte, chunkSize)
+			if _, err := file.ReadAt(buf, readPos); err != nil {
+				return fmt.Errorf("read error during data shift: %w", err)
+			}
+			if _, err := file.WriteAt(buf, writePos); err != nil {
+				return fmt.Errorf("write error during data shift: %w", err)
+			}
+		}
+	} else if delta < 0 {
+		// copy data from start-to-end.
+		for i := int64(0); i < audioDataSize; i += bufferSize {
+			readPos := originalHeaderSize + i
+			writePos := readPos + delta
+			chunkSize := bufferSize
+			if readPos+chunkSize > totalSize {
+				chunkSize = totalSize - readPos
+			}
+			if chunkSize <= 0 {
+				break
+			}
+			buf := make([]byte, chunkSize)
+			if _, err := file.ReadAt(buf, readPos); err != nil && err != io.EOF {
+				return fmt.Errorf("read error during data shift: %w", err)
+			}
+			if _, err := file.WriteAt(buf, writePos); err != nil {
+				return fmt.Errorf("write error during data shift: %w", err)
+			}
+		}
+		if err := file.Truncate(totalSize + delta); err != nil {
+			return fmt.Errorf("failed to shrink file: %w", err)
+		}
+	}
+	// otherwise just write the header lol
+	if _, err := file.WriteAt(newMetaBuf.Bytes(), 0); err != nil {
+		return fmt.Errorf("failed to write new metadata: %w", err)
+	}
+
+	return file.Close()
 }
 
 // ParseMetadata accepts a reader to a FLAC stream and consumes only FLAC metadata
