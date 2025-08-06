@@ -51,16 +51,32 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 // Thus caller should implement logic to prevent such cases.
 func (c *File) Save(fn string) error {
 	if fileIn := isFileBacked(c.Frames); fileIn != nil {
+		defer fileIn.Close()
 		fileInInfo, err := fileIn.Stat()
 		if err != nil {
 			return fmt.Errorf("failed to get input file info: %w", err)
 		}
-		fileOutInfo, err := os.Stat(fn)
-		if err != nil && !os.IsNotExist(err) {
+		fileOut, err := os.OpenFile(fn, os.O_RDWR, 0o644)
+		if err != nil {
+			if os.IsNotExist(err) {
+				f, err := os.Create(fn)
+				if err != nil {
+					return fmt.Errorf("failed to create FLAC output file: %w", err)
+				}
+				defer f.Close()
+
+				_, err = c.WriteTo(f)
+				return err
+			}
+
+			return fmt.Errorf("failed to get output file info: %w", err)
+		}
+		fileOutInfo, err := fileOut.Stat()
+		if err != nil {
 			return fmt.Errorf("failed to get output file info: %w", err)
 		}
 		if os.SameFile(fileInInfo, fileOutInfo) {
-			return c.saveInPlace(fileIn, fileInInfo)
+			return c.saveInPlace(fileOut)
 		}
 	}
 	f, err := os.Create(fn)
@@ -74,18 +90,8 @@ func (c *File) Save(fn string) error {
 }
 
 // saveInPlace performs a safe overwrite of the original file using a temporary file.
-func (c *File) saveInPlace(originalFile *os.File, originalStat os.FileInfo) error {
-	// close original so we can do rw
-	if err := c.Close(); err != nil {
-		return fmt.Errorf("warning: could not close original file handle: %v", err)
-	}
-	file, err := os.OpenFile(originalFile.Name(), os.O_RDWR, originalStat.Mode())
-	if err != nil {
-		return fmt.Errorf("failed to reopen file for writing: %w", err)
-	}
-
-	// i don't want bother calculating header size. so just ParseMetadata
-	_, err = ParseMetadata(file)
+func (c *File) saveInPlace(file *os.File) error {
+	_, err := ParseMetadata(file)
 	if err != nil {
 		return fmt.Errorf("failed to parse metadata: %w", err)
 	}
