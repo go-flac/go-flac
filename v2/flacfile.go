@@ -45,10 +45,6 @@ func (c *File) WriteTo(w io.Writer) (int64, error) {
 }
 
 // Save encapsulates WriteTo by writing the edited metadata to the given path and then piping the audio stream to the output file.
-// The output must not feed back into the input as the data will be corrupted when piping the audio stream.
-// This is commonly caused by attempting to save the file to the same location as the input file.
-// The only information this library have is an io.Reader so it is impossible to reliably detect such cases.
-// Thus caller should implement logic to prevent such cases.
 func (c *File) Save(fn string) error {
 	if fileIn := isFileBacked(c.Frames); fileIn != nil {
 		defer fileIn.Close()
