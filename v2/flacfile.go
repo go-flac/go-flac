@@ -56,7 +56,7 @@ func (c *File) Save(fn string) error {
 			return fmt.Errorf("failed to get input file info: %w", err)
 		}
 		fileOutInfo, err := os.Stat(fn)
-		if err != nil {
+		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("failed to get output file info: %w", err)
 		}
 		if os.SameFile(fileInInfo, fileOutInfo) {
