@@ -77,7 +77,7 @@ func (c *File) Save(fn string) error {
 func (c *File) saveInPlace(originalFile *os.File, originalStat os.FileInfo) error {
 	// close original so we can do rw
 	if err := c.Close(); err != nil {
-		return fmt.Errorf("warning: could not close original file handle: %v\n", err)
+		return fmt.Errorf("warning: could not close original file handle: %v", err)
 	}
 	file, err := os.OpenFile(originalFile.Name(), os.O_RDWR, originalStat.Mode())
 	if err != nil {
@@ -90,6 +90,9 @@ func (c *File) saveInPlace(originalFile *os.File, originalStat os.FileInfo) erro
 		return fmt.Errorf("failed to parse metadata: %w", err)
 	}
 	originalHeaderSize, err := file.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return fmt.Errorf("failed to seek to header: %w", err)
+	}
 
 	var newMetaBuf bytes.Buffer
 	c.Frames = nil
