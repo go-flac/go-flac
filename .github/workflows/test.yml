@@ -1,5 +1,9 @@
 name: Test
 
+permissions:
+  contents: read
+  actions: read
+
 on: [push]
 
 jobs:
@@ -35,4 +39,4 @@ jobs:
           if : ${{ matrix.go-version == '1.24.x' }}
           env:
               COVERALLS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: goveralls -coverprofile=covprofile -service=github
+          run: goveralls -coverprofile=v2/covprofile -service=github
